@@ -110,7 +110,9 @@ def respond():
     lower = text.lower()
 
     # 1) CONFIRMATION CHECK (state in action): did they say yes to a pending offer?
-    yes_words = ["haan", "yes", "theek", "ok", "okay", "kar do", "sure", " हाँ", "ठीक"]
+    yes_words = ["haan", "haa", "ha", "yes", "yeah", "yep", "theek", "thik",
+                 "ok", "okay", "kar do", "kardo", "karo", "sure", "ji",
+                 "हाँ", "हा", "ठीक", "जी", "कर दो", "करो", "बुक"]
     if pending["day"] and any(w in lower for w in yes_words):
         d, t = pending["day"], pending["time"]
         available_slots[(d, t)] = False

@@ -1,11 +1,12 @@
 <!DOCTYPE html>
 <html>
 <body style="font-family:sans-serif; max-width:600px; margin:60px auto; text-align:center;">
-  <h2>Sarvam Voice Agent — Phase 3</h2>
+  <h2>Sarvam Voice Agent — Phase 4</h2>
   <button id="btn" style="font-size:1.2rem; padding:12px 28px;">🎙️ Start recording</button>
   <p id="status"></p>
-  <div id="result" style="font-size:1.1rem; margin-top:24px; text-align:left;"></div>
-  <div id="card" style="margin-top:20px;"></div>
+  <div id="result" style="font-size:1.1rem; margin-top:20px; text-align:left;"></div>
+  <div id="card" style="margin-top:16px;"></div>
+  <div id="reply" style="margin-top:20px; font-size:1.25rem; color:#0a5;"></div>
 
 <script>
 let recorder, chunks = [], recording = false;
@@ -13,6 +14,7 @@ const btn = document.getElementById("btn");
 const status = document.getElementById("status");
 const result = document.getElementById("result");
 const card = document.getElementById("card");
+const reply = document.getElementById("reply");
 
 btn.onclick = async () => {
   if (!recording) {
@@ -25,8 +27,7 @@ btn.onclick = async () => {
     recording = true;
     btn.textContent = "⏹️ Stop";
     status.textContent = "Recording… speak now";
-    card.innerHTML = "";
-    result.textContent = "";
+    card.innerHTML = ""; reply.textContent = ""; result.textContent = "";
   } else {
     recorder.stop();
     recording = false;
@@ -39,37 +40,30 @@ async function handleAudio() {
   const blob = new Blob(chunks, { type: "audio/wav" });
   const form = new FormData();
   form.append("audio", blob, "recording.wav");
-  const res = await fetch("/transcribe", { method: "POST", body: form });
-  const data = await res.json();
-  const transcript = data.transcript || JSON.stringify(data);
+  const tRes = await fetch("/transcribe", { method: "POST", body: form });
+  const tData = await tRes.json();
+  const transcript = tData.transcript || JSON.stringify(tData);
   result.textContent = "You said: " + transcript;
 
-  status.textContent = "Understanding…";
-  const uRes = await fetch("/understand", {
+  status.textContent = "Thinking…";
+  const rRes = await fetch("/respond", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text: transcript })
   });
-  const uData = await uRes.json();
+  const data = await rRes.json();
   status.textContent = "";
-  showIntent(uData);
-}
 
-function showIntent(uData) {
-  if (uData.intent) {
-    const i = uData.intent;
+  if (data.intent) {
+    const i = data.intent;
     card.innerHTML =
-      '<div style="display:inline-block; text-align:left; padding:16px 24px; ' +
-      'border:2px solid #333; border-radius:12px; font-size:1.2rem;">' +
-      '<b>Action:</b> ' + i.action + '<br>' +
-      '<b>Day:</b> ' + i.day + '<br>' +
-      '<b>Time:</b> ' + i.time +
-      '</div>';
-  } else {
-    card.innerHTML =
-      '<div style="color:#b00;">Could not extract intent.<br>' +
-      '<small>Raw model reply: ' + JSON.stringify(uData.raw) + '</small></div>';
+      '<div style="display:inline-block; text-align:left; padding:12px 20px; ' +
+      'border:2px solid #333; border-radius:12px;">' +
+      '<b>Action:</b> ' + i.action + ' &nbsp; <b>Day:</b> ' + i.day +
+      ' &nbsp; <b>Time:</b> ' + i.time + '</div>';
   }
+  reply.textContent = "🤖 " + data.reply;
+  if (data.audio) new Audio("data:audio/wav;base64," + data.audio).play();
 }
 </script>
 </body>

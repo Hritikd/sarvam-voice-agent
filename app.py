@@ -1,6 +1,5 @@
 import os
 import json
-import base64
 import requests
 from flask import Flask, request, jsonify, send_file
 from dotenv import load_dotenv
@@ -10,9 +9,25 @@ API_KEY = os.getenv("SARVAM_API_KEY")
 
 app = Flask(__name__)
 
+# --- a tiny in-memory "calendar": True = free, False = taken ---
+available_slots = {
+    ("Tuesday", "06:00"): False,   # taken -> triggers the alternative
+    ("Tuesday", "07:00"): True,
+    ("Tuesday", "18:00"): False,   # taken -> triggers the alternative
+    ("Tuesday", "19:00"): True,
+    ("Wednesday", "18:00"): True,
+    ("Monday", "18:00"): True,
+    ("Friday", "18:00"): True,
+}
+
+# remembers a slot we offered but the user hasn't confirmed yet (this is "state")
+pending = {"day": None, "time": None}
+
+
 @app.route("/")
 def home():
     return send_file("index.html")
+
 
 @app.route("/transcribe", methods=["POST"])
 def transcribe():
@@ -24,19 +39,15 @@ def transcribe():
                       headers=headers, files=files, data=data)
     return jsonify(r.json())
 
-@app.route("/understand", methods=["POST"])
-def understand():
-    body = request.get_json()
-    transcript = body["text"]
 
+def extract_intent(transcript):
     system_prompt = (
         "You are a booking assistant. From the user's sentence, extract the "
-        "action (book, cancel, or reschedule), the day, and the time. "
-        "Reply with ONLY a JSON object and nothing else, in exactly this format: "
+        "action (book, cancel, or reschedule), the day (a weekday like Monday), "
+        "and the time. Reply with ONLY a JSON object and nothing else, exactly: "
         '{"action": "...", "day": "...", "time": "..."}. '
         "Use 24-hour time like 18:00. If any field is missing, set it to \"unknown\"."
     )
-
     headers = {"api-subscription-key": API_KEY, "Content-Type": "application/json"}
     payload = {
         "model": "sarvam-105b",
@@ -48,28 +59,24 @@ def understand():
     r = requests.post("https://api.sarvam.ai/v1/chat/completions",
                       headers=headers, json=payload)
 
-    # Pull the model's text out of the response
+    print("LLM status code:", r.status_code)      # 200 = ok, 429 = rate limit, 401/403 = auth
+    print("LLM raw response:", r.text)             # the exact message from Sarvam
+
     try:
         raw = r.json()["choices"][0]["message"]["content"]
     except Exception:
-        return jsonify({"error": "unexpected LLM response", "raw": r.json()})
+        return None
+    return safe_parse_json(raw)
 
-    # The safety net: try to find and parse JSON, don't crash if it's messy
-    intent = safe_parse_json(raw)
-    if intent is None:
-        return jsonify({"error": "could not parse intent", "raw": raw})
-
-    return jsonify({"intent": intent, "raw": raw})
 
 def safe_parse_json(text):
-    """Try hard to extract a JSON object from a possibly-messy model reply."""
+    if not text:                      # None or empty -> no crash, just fail gracefully
+        return None
     try:
-        return json.loads(text)          # clean case: it's pure JSON
+        return json.loads(text)
     except Exception:
         pass
-    # messy case: grab the substring between the first { and last }
-    start = text.find("{")
-    end = text.rfind("}")
+    start, end = text.find("{"), text.rfind("}")
     if start != -1 and end != -1 and end > start:
         try:
             return json.loads(text[start:end + 1])
@@ -77,29 +84,64 @@ def safe_parse_json(text):
             return None
     return None
 
-@app.route("/speak", methods=["POST"])
-def speak():
-    body = request.get_json()
-    text = body["text"]
-    language = body.get("language", "hi-IN")
+
+def synth_speech(text, language="hi-IN"):
     headers = {"api-subscription-key": API_KEY, "Content-Type": "application/json"}
     payload = {"inputs": [text], "target_language_code": language, "model": "bulbul:v2"}
     r = requests.post("https://api.sarvam.ai/text-to-speech",
                       headers=headers, json=payload)
-    return jsonify(r.json())
+    try:
+        return r.json()["audios"][0]
+    except Exception:
+        return None
 
-@app.route("/translate", methods=["POST"])
-def translate():
-    body = request.get_json()
-    text = body["text"]
-    headers = {"api-subscription-key": API_KEY, "Content-Type": "application/json"}
-    payload = {
-        "input": text,
-        "source_language_code": "auto",
-        "target_language_code": body.get("target", "kn-IN"),
-        "model": "mayura:v1"
-    }
-    r = requests.post("https://api.sarvam.ai/translate", headers=headers, json=payload)
-    return jsonify(r.json())
+
+def find_alternative(day):
+    for (d, t), free in available_slots.items():
+        if d == day and free:
+            return t
+    return None
+
+
+@app.route("/respond", methods=["POST"])
+def respond():
+    global pending
+    text = request.get_json()["text"]
+    lower = text.lower()
+
+    # 1) CONFIRMATION CHECK (state in action): did they say yes to a pending offer?
+    yes_words = ["haan", "yes", "theek", "ok", "okay", "kar do", "sure", " हाँ", "ठीक"]
+    if pending["day"] and any(w in lower for w in yes_words):
+        d, t = pending["day"], pending["time"]
+        available_slots[(d, t)] = False
+        reply = f"{d} {t} का स्लॉट बुक हो गया है।"
+        pending = {"day": None, "time": None}
+        return jsonify({"intent": None, "reply": reply, "audio": synth_speech(reply)})
+
+    # 2) NORMAL FLOW: understand, then act
+    intent = extract_intent(text)
+    if not intent:
+        reply = "माफ़ कीजिए, मुझे समझ नहीं आया।"
+        return jsonify({"intent": None, "reply": reply, "audio": synth_speech(reply)})
+
+    day, time = intent.get("day"), intent.get("time")
+
+    if day == "unknown" or time == "unknown":
+        reply = "कृपया बताइए किस दिन और किस समय का अपॉइंटमेंट चाहिए?"
+    elif available_slots.get((day, time)) is True:
+        available_slots[(day, time)] = False
+        reply = f"{day} {time} का स्लॉट बुक हो गया है।"
+    elif available_slots.get((day, time)) is False:
+        alt = find_alternative(day)
+        if alt:
+            pending = {"day": day, "time": alt}   # remember what we offered
+            reply = f"{time} का स्लॉट भरा हुआ है। {day} {alt} उपलब्ध है। क्या मैं बुक कर दूँ?"
+        else:
+            reply = f"{day} को कोई स्लॉट उपलब्ध नहीं है।"
+    else:
+        reply = f"{day} {time} के लिए कोई स्लॉट नहीं है।"
+
+    return jsonify({"intent": intent, "reply": reply, "audio": synth_speech(reply)})
+
 
 app.run(port=8000, debug=True)

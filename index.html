@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <body style="font-family:sans-serif; max-width:600px; margin:60px auto; text-align:center;">
-  <h2>Sarvam Voice Agent — Phase 1</h2>
+  <h2>Sarvam Voice Agent — Phase 2</h2>
   <button id="btn" style="font-size:1.2rem; padding:12px 28px;">🎙️ Start recording</button>
   <p id="status"></p>
   <div id="result" style="font-size:1.3rem; margin-top:24px; text-align:left;"></div>
@@ -37,8 +37,26 @@ async function sendAudio() {
   form.append("audio", blob, "recording.wav");
   const res = await fetch("/transcribe", { method: "POST", body: form });
   const data = await res.json();
-  status.textContent = "";
-  result.textContent = data.transcript || JSON.stringify(data);
+  const text = data.transcript || JSON.stringify(data);
+  result.textContent = text;
+  status.textContent = "Speaking…";
+  speak(text);
+}
+
+async function speak(text) {
+  const res = await fetch("/speak", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text: text, language: "hi-IN" })
+  });
+  const data = await res.json();
+  if (data.audios && data.audios[0]) {
+    const audio = new Audio("data:audio/wav;base64," + data.audios[0]);
+    audio.play();
+    status.textContent = "";
+  } else {
+    status.textContent = "TTS response: " + JSON.stringify(data);
+  }
 }
 </script>
 </body>

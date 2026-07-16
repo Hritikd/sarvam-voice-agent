@@ -25,7 +25,7 @@ def transcribe():
 
 @app.route("/speak", methods=["POST"])
 def speak():
-    body = request.get_json()          # read the text the page sent
+    body = request.get_json()
     text = body["text"]
     language = body.get("language", "hi-IN")
     headers = {"api-subscription-key": API_KEY, "Content-Type": "application/json"}
@@ -35,6 +35,21 @@ def speak():
         "model": "bulbul:v2"
     }
     r = requests.post("https://api.sarvam.ai/text-to-speech",
+                      headers=headers, json=payload)
+    return jsonify(r.json())
+
+@app.route("/translate", methods=["POST"])
+def translate():
+    body = request.get_json()
+    text = body["text"]
+    headers = {"api-subscription-key": API_KEY, "Content-Type": "application/json"}
+    payload = {
+        "input": text,
+        "source_language_code": "auto",
+        "target_language_code": body.get("target", "kn-IN"),
+        "model": "mayura:v1"
+    }
+    r = requests.post("https://api.sarvam.ai/translate",
                       headers=headers, json=payload)
     return jsonify(r.json())
 

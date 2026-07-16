@@ -1,16 +1,18 @@
 <!DOCTYPE html>
 <html>
 <body style="font-family:sans-serif; max-width:600px; margin:60px auto; text-align:center;">
-  <h2>Sarvam Voice Agent — Phase 2</h2>
+  <h2>Sarvam Voice Agent — Phase 3</h2>
   <button id="btn" style="font-size:1.2rem; padding:12px 28px;">🎙️ Start recording</button>
   <p id="status"></p>
-  <div id="result" style="font-size:1.3rem; margin-top:24px; text-align:left;"></div>
+  <div id="result" style="font-size:1.1rem; margin-top:24px; text-align:left;"></div>
+  <div id="card" style="margin-top:20px;"></div>
 
 <script>
 let recorder, chunks = [], recording = false;
 const btn = document.getElementById("btn");
 const status = document.getElementById("status");
 const result = document.getElementById("result");
+const card = document.getElementById("card");
 
 btn.onclick = async () => {
   if (!recording) {
@@ -18,11 +20,13 @@ btn.onclick = async () => {
     recorder = new MediaRecorder(stream);
     chunks = [];
     recorder.ondataavailable = e => chunks.push(e.data);
-    recorder.onstop = sendAudio;
+    recorder.onstop = handleAudio;
     recorder.start();
     recording = true;
     btn.textContent = "⏹️ Stop";
     status.textContent = "Recording… speak now";
+    card.innerHTML = "";
+    result.textContent = "";
   } else {
     recorder.stop();
     recording = false;
@@ -31,57 +35,40 @@ btn.onclick = async () => {
   }
 };
 
-async function sendAudio() {
+async function handleAudio() {
   const blob = new Blob(chunks, { type: "audio/wav" });
   const form = new FormData();
   form.append("audio", blob, "recording.wav");
   const res = await fetch("/transcribe", { method: "POST", body: form });
   const data = await res.json();
-  const original = data.transcript || JSON.stringify(data);
-  result.textContent = "You said: " + original;
-  status.textContent = "Translating…";
+  const transcript = data.transcript || JSON.stringify(data);
+  result.textContent = "You said: " + transcript;
 
-  // NEW: translate to Kannada, then speak the translation
-  const tRes = await fetch("/translate", {
+  status.textContent = "Understanding…";
+  const uRes = await fetch("/understand", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text: original, target: "kn-IN" })
+    body: JSON.stringify({ text: transcript })
   });
-  const tData = await tRes.json();
-  const translated = tData.translated_text || JSON.stringify(tData);
-  result.textContent += "  →  Kannada: " + translated;
-  status.textContent = "Speaking…";
-  speakKannada(translated);
+  const uData = await uRes.json();
+  status.textContent = "";
+  showIntent(uData);
 }
 
-async function speakKannada(text) {
-  const res = await fetch("/speak", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text: text, language: "kn-IN" })
-  });
-  const data = await res.json();
-  if (data.audios && data.audios[0]) {
-    new Audio("data:audio/wav;base64," + data.audios[0]).play();
-    status.textContent = "";
+function showIntent(uData) {
+  if (uData.intent) {
+    const i = uData.intent;
+    card.innerHTML =
+      '<div style="display:inline-block; text-align:left; padding:16px 24px; ' +
+      'border:2px solid #333; border-radius:12px; font-size:1.2rem;">' +
+      '<b>Action:</b> ' + i.action + '<br>' +
+      '<b>Day:</b> ' + i.day + '<br>' +
+      '<b>Time:</b> ' + i.time +
+      '</div>';
   } else {
-    status.textContent = "TTS response: " + JSON.stringify(data);
-  }
-}
-
-async function speak(text) {
-  const res = await fetch("/speak", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text: text, language: "hi-IN" })
-  });
-  const data = await res.json();
-  if (data.audios && data.audios[0]) {
-    const audio = new Audio("data:audio/wav;base64," + data.audios[0]);
-    audio.play();
-    status.textContent = "";
-  } else {
-    status.textContent = "TTS response: " + JSON.stringify(data);
+    card.innerHTML =
+      '<div style="color:#b00;">Could not extract intent.<br>' +
+      '<small>Raw model reply: ' + JSON.stringify(uData.raw) + '</small></div>';
   }
 }
 </script>

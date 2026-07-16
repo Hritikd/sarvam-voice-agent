@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html>
+<body style="font-family:sans-serif; max-width:600px; margin:60px auto; text-align:center;">
+  <h2>Sarvam Voice Agent — Phase 1</h2>
+  <button id="btn" style="font-size:1.2rem; padding:12px 28px;">🎙️ Start recording</button>
+  <p id="status"></p>
+  <div id="result" style="font-size:1.3rem; margin-top:24px; text-align:left;"></div>
+
+<script>
+let recorder, chunks = [], recording = false;
+const btn = document.getElementById("btn");
+const status = document.getElementById("status");
+const result = document.getElementById("result");
+
+btn.onclick = async () => {
+  if (!recording) {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    recorder = new MediaRecorder(stream);
+    chunks = [];
+    recorder.ondataavailable = e => chunks.push(e.data);
+    recorder.onstop = sendAudio;
+    recorder.start();
+    recording = true;
+    btn.textContent = "⏹️ Stop";
+    status.textContent = "Recording… speak now";
+  } else {
+    recorder.stop();
+    recording = false;
+    btn.textContent = "🎙️ Start recording";
+    status.textContent = "Transcribing…";
+  }
+};
+
+async function sendAudio() {
+  const blob = new Blob(chunks, { type: "audio/wav" });
+  const form = new FormData();
+  form.append("audio", blob, "recording.wav");
+  const res = await fetch("/transcribe", { method: "POST", body: form });
+  const data = await res.json();
+  status.textContent = "";
+  result.textContent = data.transcript || JSON.stringify(data);
+}
+</script>
+</body>
+</html>

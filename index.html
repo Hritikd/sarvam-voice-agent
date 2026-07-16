@@ -10,6 +10,7 @@
 
 <script>
 let recorder, chunks = [], recording = false;
+const sessionId = "sess-" + Math.random().toString(36).slice(2);
 const btn = document.getElementById("btn");
 const status = document.getElementById("status");
 const result = document.getElementById("result");
@@ -49,7 +50,7 @@ async function handleAudio() {
   const rRes = await fetch("/respond", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text: transcript })
+    body: JSON.stringify({ text: transcript, session: sessionId })
   });
   const data = await rRes.json();
   status.textContent = "";

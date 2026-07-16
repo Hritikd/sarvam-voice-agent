@@ -21,7 +21,12 @@ available_slots = {
 }
 
 # remembers a slot we offered but the user hasn't confirmed yet (this is "state")
-pending = {"day": None, "time": None}
+conversations = {}   # holds state per session
+
+def get_state(sid):
+    if sid not in conversations:
+        conversations[sid] = {"pending": None, "history": []}
+    return conversations[sid]
 
 
 @app.route("/")
@@ -105,22 +110,24 @@ def find_alternative(day):
 
 @app.route("/respond", methods=["POST"])
 def respond():
-    global pending
-    text = request.get_json()["text"]
+    data = request.get_json()
+    text = data["text"]
+    sid = data.get("session", "default")
+    state = get_state(sid)
     lower = text.lower()
 
-    # 1) CONFIRMATION CHECK (state in action): did they say yes to a pending offer?
     yes_words = ["haan", "haa", "ha", "yes", "yeah", "yep", "theek", "thik",
                  "ok", "okay", "kar do", "kardo", "karo", "sure", "ji",
                  "हाँ", "हा", "ठीक", "जी", "कर दो", "करो", "बुक"]
-    if pending["day"] and any(w in lower for w in yes_words):
-        d, t = pending["day"], pending["time"]
+
+    # confirmation of a pending offer
+    if state["pending"] and any(w in lower for w in yes_words):
+        d, t = state["pending"]["day"], state["pending"]["time"]
         available_slots[(d, t)] = False
         reply = f"{d} {t} का स्लॉट बुक हो गया है।"
-        pending = {"day": None, "time": None}
+        state["pending"] = None
         return jsonify({"intent": None, "reply": reply, "audio": synth_speech(reply)})
 
-    # 2) NORMAL FLOW: understand, then act
     intent = extract_intent(text)
     if not intent:
         reply = "माफ़ कीजिए, मुझे समझ नहीं आया।"
@@ -136,7 +143,7 @@ def respond():
     elif available_slots.get((day, time)) is False:
         alt = find_alternative(day)
         if alt:
-            pending = {"day": day, "time": alt}   # remember what we offered
+            state["pending"] = {"day": day, "time": alt}
             reply = f"{time} का स्लॉट भरा हुआ है। {day} {alt} उपलब्ध है। क्या मैं बुक कर दूँ?"
         else:
             reply = f"{day} को कोई स्लॉट उपलब्ध नहीं है।"
@@ -145,5 +152,4 @@ def respond():
 
     return jsonify({"intent": intent, "reply": reply, "audio": synth_speech(reply)})
 
-
-app.run(port=8000, debug=True)
+app.run(port=8000, debug=False)

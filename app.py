@@ -152,4 +152,5 @@ def respond():
 
     return jsonify({"intent": intent, "reply": reply, "audio": synth_speech(reply)})
 
-app.run(port=8000, debug=False)
+if __name__ == "__main__":
+    app.run(port=8000, debug=False)
